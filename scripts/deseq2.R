@@ -1,66 +1,86 @@
-#!/usr/bin/env Rscript
+# ============================
+# DESeq2 Workflow with Visualization
+# ============================
+
+# Load libraries
 library(DESeq2)
 library(ggplot2)
-library(pheatmap)
-library(org.Hs.eg.db)
-library(clusterProfiler)
+library(EnhancedVolcano)
 
 # ----------------------------
-# Read data
+# 1. Set paths
 # ----------------------------
-counts <- read.delim("../results/counts_matrix.tsv", check.names=FALSE, stringsAsFactors=FALSE)
-rownames(counts) <- counts[,1]; counts <- counts[,-1]; counts <- round(as.matrix(counts))
+counts_file  <- "counts_matrix.tsv"
+coldata_file <- "coldata.csv"
+results_dir  <- "E:/run_seq_parkinson/results/"
 
-coldata <- read.csv("../results/coldata.csv", check.names=FALSE, stringsAsFactors=FALSE)
-if(any(duplicated(coldata$sample_id))) coldata$sample_id <- make.unique(coldata$sample_id)
+# Create results directory if it doesn't exist
+if(!dir.exists(results_dir)) dir.create(results_dir, recursive = TRUE)
+
+# ----------------------------
+# 2. Load data
+# ----------------------------
+counts <- read.delim(counts_file, row.names=1, check.names=FALSE)
+coldata <- read.csv(coldata_file, check.names=FALSE, stringsAsFactors=FALSE)
+
+# Use sample_id as rownames
 rownames(coldata) <- coldata$sample_id
 
-# Ensure matching
-stopifnot(all(colnames(counts) == rownames(coldata)))
+# Ensure sample names match
+if(!all(colnames(counts) == rownames(coldata))) stop("Column names of counts do not match row names of coldata")
 
 # ----------------------------
-# DESeq2
+# 3. Create DESeq2 dataset
 # ----------------------------
 coldata$group <- factor(paste(coldata$condition, coldata$timepoint, sep="_"))
-dds <- DESeqDataSetFromMatrix(countData=counts, colData=coldata, design=~group)
-counts(dds) <- round(counts(dds))
+
+dds <- DESeqDataSetFromMatrix(
+  countData = round(as.matrix(counts)),
+  colData   = coldata,
+  design    = ~ group
+)
+
+# ----------------------------
+# 4. Run DESeq2
+# ----------------------------
 dds <- DESeq(dds)
 
 # ----------------------------
-# Extract results
+# 5. Generate PCA plot
 # ----------------------------
-results_dir <- "../results/"
-dir.create(results_dir, showWarnings=FALSE)
+vsd <- varianceStabilizingTransformation(dds, blind=FALSE)
+pca_data <- plotPCA(vsd, intgroup="group", returnData=TRUE)
+percentVar <- round(100 * attr(pca_data, "percentVar"))
 
-contrasts <- combn(levels(coldata$group), 2, simplify=FALSE)
-for (c in contrasts) {
-  res <- results(dds, contrast=c("group", c[1], c[2]))
-  write.csv(as.data.frame(res), file=paste0(results_dir, "DESeq2_", c[1], "_vs_", c[2], ".csv"))
-}
-
-# ----------------------------
-# PCA
-# ----------------------------
-vsd <- vst(dds, blind=FALSE)
-pca <- prcomp(t(assay(vsd)))
-pca_df <- data.frame(PC1=pca$x[,1], PC2=pca$x[,2], group=coldata$group)
-ggplot(pca_df, aes(PC1, PC2, color=group)) + geom_point(size=4) + theme_minimal()
-ggsave(paste0(results_dir, "PCA_plot.png"))
+p <- ggplot(pca_data, aes(PC1, PC2, color=group)) +
+  geom_point(size=3) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  theme_bw() +
+  ggtitle("PCA of samples")
+ggsave(filename=file.path(results_dir, "PCA_plot.png"), plot=p, width=6, height=5)
 
 # ----------------------------
-# Volcano plot (example)
+# 6. Loop through all contrasts
 # ----------------------------
-res <- results(dds, contrast=c("group","PD_d120","HC_d120"))
-res$gene <- rownames(res)
-res$significant <- ifelse(res$padj<0.05, "yes","no")
-ggplot(res, aes(log2FoldChange, -log10(padj), color=significant)) +
-  geom_point(alpha=0.5) + scale_color_manual(values=c("grey","red")) +
-  theme_minimal() + ggtitle("Volcano Plot")
-ggsave(paste0(results_dir,"Volcano_PD_d120_vs_HC_d120.png"))
+groups <- levels(coldata$group)
+combs <- combn(groups, 2, simplify=FALSE)
 
-# ----------------------------
-# GO enrichment (example)
-# ----------------------------
-sig_genes <- rownames(subset(res, padj<0.05))
-ego <- enrichGO(gene=sig_genes, OrgDb=org.Hs.eg.db, keyType="SYMBOL", ont="BP", pAdjustMethod="BH")
-write.csv(as.data.frame(ego), file=paste0(results_dir,"GO_BP_PD_d120_vs_HC_d120.csv"))
+for (contrast_pair in combs) {
+  res <- results(dds, contrast=c("group", contrast_pair[1], contrast_pair[2]))
+  
+  # Save all results
+  all_file <- paste0(results_dir, "DESeq2_", contrast_pair[1], "_vs_", contrast_pair[2], ".csv")
+  write.csv(as.data.frame(res), all_file)
+  
+  # Save significant genes
+  sig_res <- subset(res, padj < 0.05 & !is.na(padj))
+  sig_file <- paste0(results_dir, "DESeq2_significant_", contrast_pair[1], "_vs_", contrast_pair[2], ".csv")
+  write.csv(as.data.frame(sig_res), sig_file)
+  
+  # MA-plot
+  png(filename=paste0(results_dir, "MAplot_", contrast_pair[1], "_vs_", contrast_pair[2], ".png"), width=800, height=600)
+  plotMA(res, main=paste0(contrast_pair[1], " vs ", contrast_pair[2]), ylim=c(-5,5))
+  dev.off()
+
+cat("DESeq2 analysis complete. All results saved in", results_dir, "\n")
