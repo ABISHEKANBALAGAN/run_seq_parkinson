@@ -40,8 +40,8 @@ run_seq_parkinson/
     ├── DESeq2_<group1>_vs_<group2>.csv
     ├── DESeq2_significant_<group1>_vs_<group2>.csv
     ├── MAplot_<group1>_vs_<group2>.png
-    ├── Volcano_<group1>_vs_<group2>.png
-    └── PCA_plot.png
+    ├──PCA_plot.png
+    
 ```
 
 - `data/`: raw GEO dataset files
@@ -133,11 +133,10 @@ Extract results:
 
 - PCA plot to assess sample clustering: `PCA_plot.png`
 - MA plots: `MAplot_<group1>_vs_<group2>.png`
-- Volcano plots: `Volcano_<group1>_vs_<group2>.png`
 
 ### 5. Results
 
-DESeq2 outputs saved in `results/`. 145 files generated, including CSV tables, MA plots, Volcano plots, PCA plot.
+DESeq2 outputs saved in `results/`. 145 files generated, including CSV tables, MA plots, PCA plot.
 
 ## How to Run
 
